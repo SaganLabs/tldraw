@@ -1,0 +1,32 @@
+# Docker volumes and data
+tldraw-data/
+**/node_modules/
+**/.next/
+**/.env*
+**/.DS_Store
+**/*.log
+**/dist/
+**/build/
+**/.cache/
+
+# Database files
+*.db
+*.sqlite
+*.sql
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Optional npm cache directory
+.npm
+
+# Docker
+.dockerignore
