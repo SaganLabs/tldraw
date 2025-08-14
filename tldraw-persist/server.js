@@ -21,6 +21,7 @@ const app = express()
 app.use(cors({ origin: true, credentials: false }))
 app.use(bodyParser.json({ limit: "25mb" }))
 
+// --- Schema bootstrapping & migrations ---
 const ddl = `
 CREATE TABLE IF NOT EXISTS boards (
   id TEXT PRIMARY KEY,
@@ -41,19 +42,15 @@ CREATE TABLE IF NOT EXISTS board_shares (
   PRIMARY KEY (board_id, subject),
   CONSTRAINT fk_board FOREIGN KEY(board_id) REFERENCES boards(id) ON DELETE CASCADE
 );
+-- Add icon column if missing
+ALTER TABLE boards ADD COLUMN IF NOT EXISTS icon TEXT NOT NULL DEFAULT '🎨';
 `
 await pool.query(ddl).catch(err => { console.error("DB init failed", err); process.exit(1); })
 
 function requireUser(req, res, next) {
   const expectedHeader = AUTH_HEADER_USER.toLowerCase()
   const user = req.headers[expectedHeader]
-  
-  if (!user) {
-    console.log('❌ No user found in headers - returning 401')
-    return res.status(401).json({ error: "unauthorized" })
-  }
-  
-  console.log(`✅ User authenticated: ${user}`)
+  if (!user) return res.status(401).json({ error: "unauthorized" })
   req.user = String(user)
   next()
 }
@@ -66,34 +63,31 @@ function canAccess(user, board, shares, wantEdit = false) {
 }
 
 // --- Schemas ---
-const PutBody = z.any() // accept any valid tldraw JSON snapshot
-const CreateBoardBody = z.object({ 
-  name: z.string().min(1).max(100).default('Untitled Board') 
-})
-const RenameBoardBody = z.object({ 
-  name: z.string().min(1).max(100) 
-})
+const PutBody = z.any()
+const CreateBoardBody = z.object({ name: z.string().min(1).max(100).default('Untitled Board'), icon: z.string().max(8).optional() })
+const RenameBoardBody = z.object({ name: z.string().min(1).max(100) })
+const IconBody = z.object({ icon: z.string().min(1).max(8) })
 const ShareBody = z.object({ email: z.string().min(3).max(200), canEdit: z.boolean().default(true) })
 
-// --- Routes ---
 // health
 app.get("/healthz", (_req, res) => res.send("ok"))
 
-// create new board with name
+// create board
 app.post("/api/boards", requireUser, async (req, res) => {
   const id = randomUUID()
   const owner = req.user
   const body = CreateBoardBody.parse(req.body)
+  const icon = body.icon || '🎨'
   const empty = { shapes: [], bindings: [], assets: {}, pages: {}, pageStates: {}, meta: {} }
-  
+
   await pool.query(
-    `INSERT INTO boards (id, owner, name, content) VALUES ($1, $2, $3, $4)`,
-    [id, owner, body.name, empty]
+    `INSERT INTO boards (id, owner, name, content, icon) VALUES ($1, $2, $3, $4, $5)`,
+    [id, owner, body.name, empty, icon]
   )
-  res.json({ id, name: body.name })
+  res.json({ id, name: body.name, icon })
 })
 
-// get one board
+// get one board (returns name + icon + content)
 app.get("/api/boards/:id", requireUser, async (req, res) => {
   const id = req.params.id
   const user = req.user
@@ -103,10 +97,15 @@ app.get("/api/boards/:id", requireUser, async (req, res) => {
   if (board.deleted_at) return res.status(410).json({ error: "gone_soft_deleted" })
   const shares = (await pool.query(`SELECT * FROM board_shares WHERE board_id=$1`, [id])).rows
   if (!canAccess(user, board, shares, false)) return res.status(403).json({ error: "forbidden" })
-  res.json({ content: board.content, name: board.name })
+
+  // Optional: weak ETag based on updated_at timestamp
+  res.setHeader('ETag', `"${new Date(board.updated_at).getTime()}"`)
+  if (req.headers['if-none-match'] === res.getHeader('ETag')) return res.status(304).end()
+
+  res.json({ content: board.content, name: board.name, icon: board.icon })
 })
 
-// autosave (update content)
+// update content (manual save)
 app.put("/api/boards/:id", requireUser, async (req, res) => {
   const id = req.params.id
   const user = req.user
@@ -118,10 +117,12 @@ app.put("/api/boards/:id", requireUser, async (req, res) => {
   const shares = (await pool.query(`SELECT * FROM board_shares WHERE board_id=$1`, [id])).rows
   if (!canAccess(user, board, shares, true)) return res.status(403).json({ error: "forbidden" })
   await pool.query(`UPDATE boards SET content=$1, updated_at=NOW() WHERE id=$2`, [body, id])
+  const after = await pool.query(`SELECT updated_at FROM boards WHERE id=$1`, [id])
+  res.setHeader('ETag', `"${new Date(after.rows[0].updated_at).getTime()}"`)
   res.json({ ok: true })
 })
 
-// rename board
+// rename
 app.patch("/api/boards/:id/rename", requireUser, async (req, res) => {
   const id = req.params.id
   const user = req.user
@@ -131,7 +132,22 @@ app.patch("/api/boards/:id/rename", requireUser, async (req, res) => {
   const board = r.rows[0]
   if (board.owner !== user) return res.status(403).json({ error: "owner_only" })
   await pool.query(`UPDATE boards SET name=$1, updated_at=NOW() WHERE id=$2`, [body.name, id])
+  const after = await pool.query(`SELECT updated_at FROM boards WHERE id=$1`, [id])
+  res.setHeader('ETag', `"${new Date(after.rows[0].updated_at).getTime()}"`)
   res.json({ ok: true, name: body.name })
+})
+
+// update icon (owner only)
+app.patch("/api/boards/:id/icon", requireUser, async (req, res) => {
+  const id = req.params.id
+  const user = req.user
+  const body = IconBody.parse(req.body)
+  const r = await pool.query(`SELECT * FROM boards WHERE id=$1`, [id])
+  if (!r.rows.length) return res.status(404).json({ error: "not_found" })
+  const board = r.rows[0]
+  if (board.owner !== user) return res.status(403).json({ error: "owner_only" })
+  await pool.query(`UPDATE boards SET icon=$1, updated_at=NOW() WHERE id=$2`, [body.icon, id])
+  res.json({ ok: true, icon: body.icon })
 })
 
 // soft delete
@@ -178,14 +194,14 @@ app.post("/api/boards/:id/share", requireUser, async (req, res) => {
   res.json({ ok: true })
 })
 
-// list my boards (owned + shared, non-deleted) with names
+// list my boards (owned + shared, name + icon + updated)
 app.get("/api/me/boards", requireUser, async (req, res) => {
   const user = req.user
   const owned = (await pool.query(
-    `SELECT id, name, updated_at FROM boards WHERE owner=$1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 200`, [user]
+    `SELECT id, name, icon, updated_at FROM boards WHERE owner=$1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 200`, [user]
   )).rows
   const shared = (await pool.query(
-    `SELECT b.id, b.name, b.updated_at FROM board_shares s JOIN boards b ON b.id=s.board_id WHERE s.subject=$1 AND b.deleted_at IS NULL ORDER BY b.updated_at DESC LIMIT 200`, [user]
+    `SELECT b.id, b.name, b.icon, b.updated_at FROM board_shares s JOIN boards b ON b.id=s.board_id WHERE s.subject=$1 AND b.deleted_at IS NULL ORDER BY b.updated_at DESC LIMIT 200`, [user]
   )).rows
   res.json({ owned, shared })
 })
