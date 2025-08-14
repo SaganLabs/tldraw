@@ -4,7 +4,68 @@ import 'tldraw/tldraw.css'
 import { useEffect, useRef, useState } from 'react'
 import './board.css'
 
-// --- Share Modal ---
+// Material Icon Component
+const MaterialIcon = ({ name, className = '' }: { name: string, className?: string }) => (
+  <span className={`material-symbols-rounded ${className}`}>{name}</span>
+)
+
+// Confirmation Modal for Unsaved Changes
+function UnsavedChangesModal({
+  open,
+  onClose,
+  onSave,
+  onDiscard,
+  saving
+}: {
+  open: boolean
+  onClose: () => void
+  onSave: () => void
+  onDiscard: () => void
+  saving: boolean
+}) {
+  if (!open) return null
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content unsaved-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">
+            <MaterialIcon name="warning" className="modal-icon warning" />
+            <h3>Unsaved Changes</h3>
+          </div>
+        </div>
+        
+        <div className="modal-body">
+          <div className="unsaved-content">
+            <p>You have unsaved changes on this board. What would you like to do?</p>
+          </div>
+        </div>
+        
+        <div className="modal-actions">
+          <button onClick={onDiscard} className="btn-secondary" disabled={saving}>
+            <MaterialIcon name="close" />
+            <span>Discard Changes</span>
+          </button>
+          <button onClick={onSave} className="btn-primary" disabled={saving}>
+            {saving ? (
+              <>
+                <div className="spinner-mini"></div>
+                <span>Saving...</span>
+              </>
+            ) : (
+              <>
+                <MaterialIcon name="save" />
+                <span>Save & Continue</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Share Modal
 function ShareModal({
   open,
   onClose,
@@ -27,68 +88,91 @@ function ShareModal({
   }, [open])
 
   if (!open) return null
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>Share Board</h3>
+          <div className="modal-title">
+            <MaterialIcon name="share" className="modal-icon" />
+            <h3>Share Board</h3>
+          </div>
           <button onClick={onClose} className="modal-close">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <MaterialIcon name="close" />
           </button>
         </div>
 
         <div className="modal-body">
           <div className="input-group">
-            <label htmlFor="shareEmailBoard">User email</label>
-            <input
-              id="shareEmailBoard"
-              type="email"
-              placeholder="name@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoFocus
-              className="board-name-input"
-              maxLength={200}
-            />
+            <label htmlFor="shareEmailBoard">Email Address</label>
+            <div className="input-container">
+              <MaterialIcon name="mail" className="input-icon" />
+              <input
+                id="shareEmailBoard"
+                type="email"
+                placeholder="colleague@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoFocus
+                className="board-input"
+                maxLength={200}
+              />
+            </div>
           </div>
 
-          <div className="input-group" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input
-              id="shareCanEditBoard"
-              type="checkbox"
-              checked={canEdit}
-              onChange={(e) => setCanEdit(e.target.checked)}
-            />
-            <label htmlFor="shareCanEditBoard">Allow editing</label>
+          <div className="checkbox-group">
+            <label className="checkbox-label">
+              <input
+                id="shareCanEditBoard"
+                type="checkbox"
+                checked={canEdit}
+                onChange={(e) => setCanEdit(e.target.checked)}
+                className="checkbox-input"
+              />
+              <div className="checkbox-custom">
+                <MaterialIcon name="check" className="checkbox-icon" />
+              </div>
+              <span>Allow editing</span>
+            </label>
           </div>
+        </div>
 
-          <div className="modal-actions">
-            <button onClick={onClose} className="btn-secondary">Cancel</button>
-            <button
-              onClick={() => onShare(email.trim(), canEdit)}
-              disabled={!email.trim() || sharing}
-              className="btn-primary"
-            >
-              {sharing ? (<><div className="spinner-mini"></div>Sharing...</>) : ('Share')}
-            </button>
-          </div>
+        <div className="modal-actions">
+          <button onClick={onClose} className="btn-secondary">
+            Cancel
+          </button>
+          <button
+            onClick={() => onShare(email.trim(), canEdit)}
+            disabled={!email.trim() || sharing}
+            className="btn-primary"
+          >
+            {sharing ? (
+              <>
+                <div className="spinner-mini"></div>
+                <span>Sharing...</span>
+              </>
+            ) : (
+              <>
+                <MaterialIcon name="send" />
+                <span>Share Board</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
     </div>
   )
 }
 
-// Modern Floating Controls Panel
-function BoardControlsPanel({
+// Revolutionary Draggable Floating Controls
+function DraggableFloatingControls({
   boardId,
   boardName,
   status,
   onRename,
   onSave,
-  onOpenShare
+  onOpenShare,
+  onDashboard
 }: {
   boardId: string
   boardName: string
@@ -96,10 +180,96 @@ function BoardControlsPanel({
   onRename: (newName: string) => void
   onSave: () => void
   onOpenShare: () => void
+  onDashboard: () => void
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [position, setPosition] = useState({ x: 24, y: 24 })
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [isRenaming, setIsRenaming] = useState(false)
   const [newName, setNewName] = useState('')
+  
+  const controlsRef = useRef<HTMLDivElement>(null)
+  const dragStartPos = useRef({ x: 0, y: 0 })
+
+  const getStatusIcon = () => {
+    switch (status) {
+      case 'saved': return 'check_circle'
+      case 'saving': return 'sync'
+      case 'loading': return 'hourglass_empty'
+      case 'error': return 'error'
+      case 'dirty': return 'edit'
+      default: return 'edit'
+    }
+  }
+
+  const getStatusColor = () => {
+    switch (status) {
+      case 'saved': return '#10b981'
+      case 'saving': return '#f59e0b'
+      case 'loading': return '#6b7280'
+      case 'error': return '#ef4444'
+      case 'dirty': return '#f59e0b'
+      default: return '#6b7280'
+    }
+  }
+
+  const getStatusText = () => {
+    switch (status) {
+      case 'saved': return 'All changes saved'
+      case 'saving': return 'Saving changes...'
+      case 'loading': return 'Loading board...'
+      case 'error': return 'Error occurred'
+      case 'dirty': return 'Unsaved changes'
+      default: return 'Ready'
+    }
+  }
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (isRenaming) return
+    
+    const rect = controlsRef.current?.getBoundingClientRect()
+    if (!rect) return
+
+    setIsDragging(true)
+    dragStartPos.current = { x: e.clientX, y: e.clientY }
+    setDragOffset({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    })
+  }
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!isDragging) return
+  
+    const deltaX = Math.abs(e.clientX - dragStartPos.current.x)
+    const deltaY = Math.abs(e.clientY - dragStartPos.current.y)
+    
+    // Only start dragging if moved more than 5px (prevents accidental drags)
+    if (deltaX > 5 || deltaY > 5) {
+      const controlsWidth = isExpanded ? 380 : 64
+      const controlsHeight = isExpanded ? 420 : 64
+      const newX = Math.max(0, Math.min(window.innerWidth - controlsWidth, e.clientX - dragOffset.x))
+      const newY = Math.max(0, Math.min(window.innerHeight - controlsHeight, e.clientY - dragOffset.y))
+      
+      setPosition({ x: newX, y: newY })
+    }
+  }
+
+  const handleMouseUp = () => {
+    setIsDragging(false)
+  }
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [isDragging, dragOffset])
 
   const startRename = () => {
     setNewName(boardName)
@@ -119,82 +289,72 @@ function BoardControlsPanel({
     setNewName('')
   }
 
-  const getStatusIcon = () => {
-    switch (status) {
-      case 'saved': return '✓'
-      case 'saving': return '↻'
-      case 'loading': return '⏳'
-      case 'error': return '⚠'
-      case 'dirty': return '•'
-      default: return '•'
-    }
-  }
-
-  const getStatusColor = () => {
-    switch (status) {
-      case 'saved': return '#10b981'
-      case 'saving': return '#f59e0b'
-      case 'loading': return '#6b7280'
-      case 'error': return '#ef4444'
-      case 'dirty': return '#f59e0b' // unsaved changes
-      default: return '#6b7280'
-    }
-  }
-
   return (
-    <div className={`floating-controls ${isExpanded ? 'expanded' : 'collapsed'}`}>
-      {/* Status Indicator */}
-      <div className="status-indicator">
-        <span className="status-dot" style={{ color: getStatusColor() }} title={`Status: ${status}`}>
-          {getStatusIcon()}
-        </span>
-      </div>
-
-      {/* Main Toggle Button */}
-      <button
-        className="main-toggle"
-        onClick={() => setIsExpanded(!isExpanded)}
-        title={isExpanded ? 'Collapse controls' : 'Expand controls'}
+    <div
+      ref={controlsRef}
+      className={`floating-controls ${isExpanded ? 'expanded' : 'collapsed'} ${isDragging ? 'dragging' : ''}`}
+      style={{
+        right: 'auto',
+        bottom: 'auto',
+        left: position.x,
+        top: position.y,
+        cursor: isDragging ? 'grabbing' : 'grab'
+      }}
+    >
+      {/* Draggable Header */}
+      <div 
+        className="controls-header-drag"
+        onMouseDown={handleMouseDown}
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`toggle-icon ${isExpanded ? 'rotated' : ''}`}>
-          <path d="M12 2v20m8-10H4" />
-        </svg>
-      </button>
+        <div className="drag-indicator">
+          <MaterialIcon name="drag_indicator" />
+        </div>
+        
+        {/* Status Indicator */}
+        <div className="status-pill" style={{ color: getStatusColor() }}>
+          <MaterialIcon name={getStatusIcon()} className={`status-icon ${status === 'saving' ? 'spinning' : ''}`} />
+          <span className="status-text">{getStatusText()}</span>
+        </div>
+
+        {/* Expand/Collapse Button */}
+        <button
+          className="expand-toggle"
+          onClick={() => setIsExpanded(!isExpanded)}
+          title={isExpanded ? 'Collapse controls' : 'Expand controls'}
+        >
+          <MaterialIcon name={isExpanded ? 'expand_less' : 'expand_more'} className="toggle-icon" />
+        </button>
+      </div>
 
       {/* Expanded Content */}
       <div className={`controls-content ${isExpanded ? 'visible' : 'hidden'}`}>
-        <div className="controls-header">
-          <h3>Board Controls</h3>
-        </div>
-
+        {/* Board Name Section */}
         <div className="control-section">
           <label className="control-label">Board Name</label>
           {isRenaming ? (
-            <div className="rename-input-group">
-              <input
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') confirmRename()
-                  if (e.key === 'Escape') cancelRename()
-                }}
-                onBlur={confirmRename}
-                autoFocus
-                className="rename-input"
-                maxLength={100}
-              />
+            <div className="rename-container">
+              <div className="input-container">
+                <MaterialIcon name="title" className="input-icon" />
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') confirmRename()
+                    if (e.key === 'Escape') cancelRename()
+                  }}
+                  onBlur={confirmRename}
+                  autoFocus
+                  className="board-input"
+                  maxLength={100}
+                />
+              </div>
               <div className="rename-actions">
                 <button onClick={confirmRename} className="rename-btn confirm">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="20,6 9,17 4,12" />
-                  </svg>
+                  <MaterialIcon name="check" />
                 </button>
                 <button onClick={cancelRename} className="rename-btn cancel">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
+                  <MaterialIcon name="close" />
                 </button>
               </div>
             </div>
@@ -203,72 +363,72 @@ function BoardControlsPanel({
               <span className="board-name-text" title={boardName}>
                 {boardName}
               </span>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="edit-icon">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
+              <MaterialIcon name="edit" className="edit-icon" />
             </div>
           )}
         </div>
 
-        <div className="control-section">
-          <label className="control-label">Status</label>
-          <div className="status-display">
-            <span className="status-indicator-text" style={{ color: getStatusColor() }}>
-              {getStatusIcon()} {status === 'dirty' ? 'Unsaved changes' : status.charAt(0).toUpperCase() + status.slice(1)}
-            </span>
-          </div>
-        </div>
-
-        <div className="controls-actions">
+        {/* Quick Actions */}
+        <div className="quick-actions">
           <button
             onClick={onSave}
-            className="action-btn save-btn"
-            // Only enable Save when there are unsaved changes
-            disabled={!(status === 'dirty')}
+            className={`quick-action-btn ${status === 'dirty' ? 'save-ready' : 'save-disabled'}`}
+            disabled={status !== 'dirty'}
+            title="Save board"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-              <polyline points="17,21 17,13 7,13 7,21" />
-              <polyline points="7,3 7,8 15,8" />
-            </svg>
-            {status === 'saving' ? 'Saving...' : 'Save Now'}
+            <MaterialIcon name={status === 'saving' ? 'sync' : 'save'} className={status === 'saving' ? 'spinning' : ''} />
+            <span>Save</span>
           </button>
 
-          <button onClick={onOpenShare} className="action-btn secondary">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M4 12v7a2 2 0 0 0 2 2h12" />
-              <polyline points="16 6 12 2 8 6" />
-              <line x1="12" y1="2" x2="12" y2="15" />
-            </svg>
-            Share
+          <button
+            onClick={onOpenShare}
+            className="quick-action-btn"
+            title="Share board"
+          >
+            <MaterialIcon name="share" />
+            <span>Share</span>
           </button>
 
-          <button onClick={() => (window.location.href = '/')} className="action-btn dashboard-btn">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <polyline points="9,22 9,12 15,12 15,22" />
-            </svg>
-            Dashboard
+          <button
+            onClick={onDashboard}
+            className="quick-action-btn dashboard"
+            title="Back to dashboard"
+          >
+            <MaterialIcon name="dashboard" />
+            <span>Dashboard</span>
           </button>
+        </div>
+
+        {/* Board Info */}
+        <div className="board-info">
+          <div className="info-item">
+            <MaterialIcon name="schedule" className="info-icon" />
+            <span>Last saved: {status === 'saved' ? 'Just now' : 'Pending'}</span>
+          </div>
+          <div className="info-item">
+            <MaterialIcon name="sync" className="info-icon" />
+            <span>Auto-sync: Off</span>
+          </div>
         </div>
       </div>
     </div>
   )
 }
 
-// Manual-save + Polling (no autosave)
+// Manual-save + Polling with Unsaved Changes Detection
 function BoardSyncHandler({ boardId }: { boardId: string }) {
   const editor = useEditor()
   const poller = useRef<number | undefined>(undefined)
   const etagRef = useRef<string | null>(null)
-  const applyingRef = useRef(false) // suppress dirty during remote apply
+  const applyingRef = useRef(false)
   const statusRef = useRef<'loading' | 'saving' | 'saved' | 'error' | 'dirty'>('loading')
 
   const [status, setStatus] = useState<'loading' | 'saving' | 'saved' | 'error' | 'dirty'>('loading')
   const [boardName, setBoardName] = useState<string>('')
   const [shareOpen, setShareOpen] = useState(false)
   const [sharing, setSharing] = useState(false)
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false)
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
 
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || ''
 
@@ -281,7 +441,6 @@ function BoardSyncHandler({ boardId }: { boardId: string }) {
     return false
   }
 
-  // keep ref in sync so poll loop sees current status
   useEffect(() => {
     statusRef.current = status
   }, [status])
@@ -323,13 +482,13 @@ function BoardSyncHandler({ boardId }: { boardId: string }) {
       }
     })()
 
-    // Mark "dirty" on local edits (no autosave)
+    // Mark "dirty" on local edits
     const unsub = editor.store.listen(() => {
       if (applyingRef.current) return
       setStatus((s) => (s === 'saving' ? s : 'dirty'))
     }, { scope: 'document' })
 
-    // Polling for remote updates (skip if we have unsaved changes)
+    // Polling for remote updates
     const poll = async () => {
       try {
         if (statusRef.current === 'dirty' || statusRef.current === 'saving') return
@@ -355,7 +514,6 @@ function BoardSyncHandler({ boardId }: { boardId: string }) {
             applyingRef.current = false
           }
         }
-        // keep status as 'saved' (we only change to 'dirty' on local edits)
       } catch {
         // Ignore transient polling errors
       }
@@ -406,6 +564,13 @@ function BoardSyncHandler({ boardId }: { boardId: string }) {
         const et = res.headers.get('ETag')
         if (et) etagRef.current = et
         setStatus('saved')
+        
+        // Execute pending navigation if any
+        if (pendingNavigation) {
+          pendingNavigation()
+          setPendingNavigation(null)
+          setShowUnsavedModal(false)
+        }
       } else {
         console.error('Manual save failed:', res.status, await res.text())
         setStatus('error')
@@ -414,6 +579,23 @@ function BoardSyncHandler({ boardId }: { boardId: string }) {
       console.error('Manual save error:', e)
       setStatus('error')
     }
+  }
+
+  const handleDashboardNavigation = () => {
+    if (status === 'dirty') {
+      setPendingNavigation(() => () => window.location.href = '/')
+      setShowUnsavedModal(true)
+    } else {
+      window.location.href = '/'
+    }
+  }
+
+  const handleDiscardChanges = () => {
+    if (pendingNavigation) {
+      pendingNavigation()
+      setPendingNavigation(null)
+    }
+    setShowUnsavedModal(false)
   }
 
   const share = async (email: string, canEdit: boolean) => {
@@ -444,15 +626,30 @@ function BoardSyncHandler({ boardId }: { boardId: string }) {
 
   return (
     <>
-      <BoardControlsPanel
+      <DraggableFloatingControls
         boardId={boardId}
         boardName={boardName}
         status={status}
         onRename={handleRename}
         onSave={handleManualSave}
         onOpenShare={() => setShareOpen(true)}
+        onDashboard={handleDashboardNavigation}
       />
-      <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} onShare={share} sharing={sharing} />
+      
+      <ShareModal 
+        open={shareOpen} 
+        onClose={() => setShareOpen(false)} 
+        onShare={share} 
+        sharing={sharing} 
+      />
+      
+      <UnsavedChangesModal
+        open={showUnsavedModal}
+        onClose={() => setShowUnsavedModal(false)}
+        onSave={handleManualSave}
+        onDiscard={handleDiscardChanges}
+        saving={status === 'saving'}
+      />
     </>
   )
 }
